@@ -1,0 +1,34 @@
+
+server:
+  port: 8080
+
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/expense_claims}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:localhost}
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 5MB
+
+app:
+  jwt:
+    secret: ${JWT_SECRET:change-this-secret-to-a-long-random-value-at-least-32-bytes}
+    access-ms: 900000
+    refresh-ms: 604800000
+
+  upload-dir: ${UPLOAD_DIR:./uploads}
+
+  manager:
+    email: ${MANAGER_EMAIL:amni@gmail.com}
+    password: ${MANAGER_PASSWORD:amni123}

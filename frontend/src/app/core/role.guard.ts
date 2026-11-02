@@ -1,0 +1,2 @@
+import { CanActivateFn, Router } from '@angular/router'; import { inject } from '@angular/core'; import { AuthService } from './auth.service';
+export const roleGuard=(...roles:Array<'EMPLOYEE'|'MANAGER'>):CanActivateFn=>()=>{const s=inject(AuthService).session();const router=inject(Router);if(!s){router.navigateByUrl('/login');return false;}if(roles.length&&!roles.includes(s.role)){router.navigateByUrl('/denied');return false;}return true;};
