@@ -1,0 +1,420 @@
+
+package com.expense.service.impl;
+
+import com.expense.dto.ClaimDtos.*;
+import com.expense.entity.*;
+import com.expense.repository.*;
+import com.expense.exception.BadRequestException;
+import com.expense.exception.ResourceNotFoundException;
+
+import com.expense.service.ClaimService;
+import org.springframework.data.domain.*;
+import org.springframework.data.jpa.domain.Specification;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.time.LocalDate;
+import java.util.*;
+import java.nio.file.*;
+import java.io.IOException;
+
+@Service
+public class ClaimServiceImpl implements ClaimService {
+
+ private final ClaimRepository claims;
+ private final UserRepository users;
+ private final AuditRepository audits;
+
+ private final Path uploadDir;
+
+ public ClaimServiceImpl(
+         ClaimRepository c,
+         UserRepository u,
+         AuditRepository a,
+         @Value("${app.upload-dir:./uploads}") String dir) {
+
+  claims = c;
+  users = u;
+  audits = a;
+  uploadDir = Path.of(dir).toAbsolutePath().normalize();
+ }
+
+ private AppUser actor(String email) {
+  return users.findByEmail(email)
+          .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+ }
+
+ private ExpenseClaim owned(Long id, AppUser u) {
+  ExpenseClaim c = claims.findById(id)
+          .orElseThrow(() -> new ResourceNotFoundException("Claim not found"));
+
+  if (!c.getEmployee().getId().equals(u.getId())) {
+   throw new ResourceNotFoundException("Claim not found");
+  }
+
+  return c;
+ }
+
+ private ClaimResponse dto(ExpenseClaim c) {
+  AppUser m = c.getAssignedManager();
+
+  return new ClaimResponse(
+          c.getId(),
+          c.getTitle(),
+          c.getAmount(),
+          c.getCategory(),
+          c.getExpenseDate(),
+          c.getDescription(),
+          c.getStatus().name(),
+          c.getEmployee().getId(),
+          c.getEmployee().getFullName(),
+          c.getEmployee().getEmail(),
+          m == null ? null : m.getId(),
+          m == null ? null : m.getFullName(),
+          m == null ? null : m.getEmail(),
+          c.getManagerComment(),
+          c.getReceiptFileName(),
+          c.getCreatedAt(),
+          c.getUpdatedAt()
+  );
+ }
+
+ private void audit(
+         ExpenseClaim c,
+         AppUser u,
+         String action,
+         String details) {
+
+  audits.save(new ClaimAudit(c, u, action, details));
+ }
+
+ @Transactional
+ public ClaimResponse create(String email, ClaimRequest r) {
+  AppUser u = actor(email);
+
+  ExpenseClaim c = new ExpenseClaim();
+  c.setEmployee(u);
+
+  apply(c, r);
+
+  c = claims.save(c);
+
+  audit(
+          c,
+          u,
+          "CREATED",
+          "Claim submitted to " + c.getAssignedManager().getFullName()
+  );
+
+  return dto(c);
+ }
+
+ @Transactional
+ public ClaimResponse update(String email, Long id, ClaimRequest r) {
+  AppUser u = actor(email);
+  ExpenseClaim c = owned(id, u);
+
+  pending(c);
+  apply(c, r);
+
+  audit(c, u, "UPDATED", "Claim details updated");
+
+  return dto(c);
+ }
+
+ @Transactional
+ public void delete(String email, Long id) {
+  AppUser u = actor(email);
+  ExpenseClaim c = owned(id, u);
+
+  pending(c);
+
+  audit(c, u, "DELETED", "Claim deleted");
+
+  claims.delete(c);
+ }
+
+ private void pending(ExpenseClaim c) {
+  if (c.getStatus() != ClaimStatus.PENDING) {
+   throw new BadRequestException(
+           "Only Pending claims can be changed"
+   );
+  }
+ }
+
+ private void apply(ExpenseClaim c, ClaimRequest r) {
+
+  if (r.expenseDate().isAfter(
+          LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")))) {
+
+   throw new BadRequestException(
+           "Expense date cannot be in the future"
+   );
+  }
+
+  AppUser manager = users.findById(r.managerId())
+          .filter(m -> m.getRole() == Role.MANAGER && m.isActive())
+          .orElseThrow(() -> new BadRequestException(
+                  "Select an active manager"
+          ));
+
+  c.setAssignedManager(manager);
+  c.setTitle(r.title());
+  c.setAmount(r.amount());
+  c.setCategory(r.category());
+  c.setExpenseDate(r.expenseDate());
+  c.setDescription(r.description());
+ }
+
+ public List<ManagerOption> managers() {
+  return users.findByRoleAndActiveTrue(Role.MANAGER)
+          .stream()
+          .map(m -> new ManagerOption(
+                  m.getId(),
+                  m.getFullName(),
+                  m.getEmail()
+          ))
+          .toList();
+ }
+
+ public Page<ClaimResponse> employeeList(
+         String email,
+         String status,
+         String search,
+         Pageable p) {
+
+  AppUser u = actor(email);
+
+  Specification<ExpenseClaim> s = (root, q, cb) ->
+          cb.equal(root.get("employee").get("id"), u.getId());
+
+  if (status != null && !status.isBlank()) {
+   s = s.and((r, q, cb) ->
+           cb.equal(
+                   r.get("status"),
+                   ClaimStatus.valueOf(status.toUpperCase())
+           )
+   );
+  }
+
+  if (search != null && !search.isBlank()) {
+   s = s.and((r, q, cb) ->
+           cb.like(
+                   cb.lower(r.get("title")),
+                   "%" + search.toLowerCase() + "%"
+           )
+   );
+  }
+
+  return claims.findAll(s, p).map(this::dto);
+ }
+
+ public Page<ClaimResponse> managerList(
+         String email,
+         String status,
+         String employee,
+         String from,
+         String to,
+         Pageable p) {
+
+  AppUser manager = actor(email);
+
+  Specification<ExpenseClaim> s = (root, q, cb) ->
+          cb.equal(root.get("assignedManager").get("id"), manager.getId());
+
+  if (status != null && !status.isBlank()) {
+   s = s.and((r, q, cb) ->
+           cb.equal(
+                   r.get("status"),
+                   ClaimStatus.valueOf(status.toUpperCase())
+           )
+   );
+  }
+
+  if (employee != null && !employee.isBlank()) {
+   String term = "%" + employee.toLowerCase() + "%";
+
+   s = s.and((r, q, cb) ->
+           cb.or(
+                   cb.like(cb.lower(r.get("employee").get("email")), term),
+                   cb.like(cb.lower(r.get("employee").get("fullName")), term)
+           )
+   );
+  }
+
+  if (from != null && !from.isBlank()) {
+   s = s.and((r, q, cb) ->
+           cb.greaterThanOrEqualTo(
+                   r.get("expenseDate"),
+                   LocalDate.parse(from)
+           )
+   );
+  }
+
+  if (to != null && !to.isBlank()) {
+   s = s.and((r, q, cb) ->
+           cb.lessThanOrEqualTo(
+                   r.get("expenseDate"),
+                   LocalDate.parse(to)
+           )
+   );
+  }
+
+  return claims.findAll(s, p).map(this::dto);
+ }
+
+ @Transactional
+ public ClaimResponse review(String email, Long id, ReviewRequest r) {
+
+  AppUser manager = actor(email);
+
+  ExpenseClaim c = claims.findById(id)
+          .orElseThrow(() -> new ResourceNotFoundException("Claim not found"));
+
+  if (c.getAssignedManager() == null
+          || !c.getAssignedManager().getId().equals(manager.getId())) {
+
+   throw new ResourceNotFoundException("Claim not found");
+  }
+
+  pending(c);
+
+  String d = r.decision().toUpperCase();
+
+  if (!d.equals("APPROVED") && !d.equals("REJECTED")) {
+   throw new BadRequestException(
+           "Decision must be APPROVED or REJECTED"
+   );
+  }
+
+  if (d.equals("REJECTED")
+          && (r.comment() == null || r.comment().isBlank())) {
+
+   throw new BadRequestException(
+           "Comment is mandatory for rejection"
+   );
+  }
+
+  c.setStatus(ClaimStatus.valueOf(d));
+  c.setReviewedBy(manager);
+  c.setManagerComment(r.comment());
+
+  audit(c, manager, d, r.comment());
+
+  return dto(c);
+ }
+
+ public List<AuditResponse> timeline(String email, Long id) {
+
+  AppUser u = actor(email);
+
+  ExpenseClaim c = claims.findById(id)
+          .orElseThrow(() -> new ResourceNotFoundException("Claim not found"));
+
+  if (u.getRole() == Role.EMPLOYEE
+          && !c.getEmployee().getId().equals(u.getId())
+          || u.getRole() == Role.MANAGER
+          && (c.getAssignedManager() == null
+          || !c.getAssignedManager().getId().equals(u.getId()))) {
+
+   throw new ResourceNotFoundException("Claim not found");
+  }
+
+  return audits.findByClaimIdOrderByHappenedAtAsc(id)
+          .stream()
+          .map(a -> new AuditResponse(
+                  a.getActor().getFullName(),
+                  a.getAction(),
+                  a.getDetails(),
+                  a.getHappenedAt()
+          ))
+          .toList();
+ }
+
+ @Transactional
+ public ClaimResponse uploadReceipt(
+         String email,
+         Long id,
+         MultipartFile file) throws IOException {
+
+  AppUser u = actor(email);
+  ExpenseClaim c = owned(id, u);
+
+  pending(c);
+
+  String type = file.getContentType();
+
+  if (file.isEmpty()
+          || file.getSize() > 5L * 1024 * 1024
+          || !("application/pdf".equals(type)
+          || "image/png".equals(type)
+          || "image/jpeg".equals(type)
+          || "image/webp".equals(type))) {
+
+   throw new BadRequestException(
+           "Receipt must be a PDF or PNG, JPEG, or WebP image up to 5 MB"
+   );
+  }
+
+  Files.createDirectories(uploadDir);
+
+  String ext = "application/pdf".equals(type) ? ".pdf"
+          : "image/png".equals(type) ? ".png"
+            : "image/webp".equals(type) ? ".webp"
+              : ".jpg";
+
+  String stored = UUID.randomUUID() + ext;
+
+  Path target = uploadDir.resolve(stored).normalize();
+
+  if (!target.getParent().equals(uploadDir)) {
+   throw new BadRequestException("Invalid filename");
+  }
+
+  file.transferTo(target);
+
+  c.setReceiptStoredName(stored);
+
+  c.setReceiptFileName(
+          Optional.ofNullable(file.getOriginalFilename())
+                  .orElse("receipt")
+  );
+
+  audit(c, u, "RECEIPT_UPLOADED", "Receipt attached");
+
+  return dto(c);
+ }
+
+ public Path receipt(String email, Long id) throws IOException {
+
+  AppUser u = actor(email);
+
+  ExpenseClaim c = claims.findById(id)
+          .orElseThrow(() -> new ResourceNotFoundException("Claim not found"));
+
+  if (u.getRole() == Role.EMPLOYEE
+          && !c.getEmployee().getId().equals(u.getId())
+          || u.getRole() == Role.MANAGER
+          && (c.getAssignedManager() == null
+          || !c.getAssignedManager().getId().equals(u.getId()))) {
+
+   throw new ResourceNotFoundException("Claim not found");
+  }
+
+  if (c.getReceiptStoredName() == null) {
+   throw new ResourceNotFoundException("Receipt not found");
+  }
+
+  Path p = uploadDir.resolve(c.getReceiptStoredName()).normalize();
+
+  if (!p.startsWith(uploadDir) || !Files.exists(p)) {
+   throw new ResourceNotFoundException("Receipt not found");
+  }
+
+  return p;
+ }
+}
+
+
