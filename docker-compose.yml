@@ -22,9 +22,9 @@ services:
       DB_URL: jdbc:postgresql://postgres:5432/expense_claims
       DB_USERNAME: postgres
       DB_PASSWORD: ${DB_PASSWORD:-localhost}
-      JWT_SECRET: ${JWT_SECRET:-local-compose-secret-change-me-32-bytes}
-      MANAGER_EMAIL: ${MANAGER_EMAIL:-amni@gmail.com}
-      MANAGER_PASSWORD: ${MANAGER_PASSWORD:-amni123}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in ExpenseClaimManagement/.env}
+      MANAGER_EMAIL: ${MANAGER_EMAIL:?Set MANAGER_EMAIL in ExpenseClaimManagement/.env}
+      MANAGER_PASSWORD: ${MANAGER_PASSWORD:?Set MANAGER_PASSWORD in ExpenseClaimManagement/.env}
       UPLOAD_DIR: /data/uploads
     ports:
       - "8080:8080"

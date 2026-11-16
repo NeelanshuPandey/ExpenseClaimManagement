@@ -23,12 +23,12 @@ spring:
 
 app:
   jwt:
-    secret: ${JWT_SECRET:change-this-secret-to-a-long-random-value-at-least-32-bytes}
+    secret: ${JWT_SECRET}
     access-ms: 900000
     refresh-ms: 604800000
 
   upload-dir: ${UPLOAD_DIR:./uploads}
 
   manager:
-    email: ${MANAGER_EMAIL:amni@gmail.com}
-    password: ${MANAGER_PASSWORD:amni123}
+    email: ${MANAGER_EMAIL}
+    password: ${MANAGER_PASSWORD}

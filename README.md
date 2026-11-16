@@ -6,6 +6,14 @@ Full-stack expense claim app with a Spring Boot 3 / Java 17 API, Angular 20 fron
 
 Prerequisites: Docker Desktop with its engine running.
 
+Create the local environment config before starting the app:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Edit `.env` and set a unique manager password and a cryptographically random `JWT_SECRET` of at least 32 bytes. Keep `.env` private and out of version control. The seeded manager password is BCrypt-hashed in the database; JWTs are signed with the configured secret.
+
 From this folder (`ExpenseClaimManagement`):
 
 ```powershell
@@ -17,12 +25,7 @@ docker compose up --build -d
 - Swagger UI: http://localhost:8080/swagger-ui/index.html
 - PostgreSQL: `localhost:5432`, database `expense_claims`, user `postgres`, password `localhost`
 
-Seeded manager account for a new database:
-
-- Email: `amni@gmail.com`
-- Password: `amni123`
-
-Set `MANAGER_EMAIL`, `MANAGER_PASSWORD`, `DB_PASSWORD`, and `JWT_SECRET` in the environment before starting Compose to override development defaults. Use a strong JWT secret outside local development. Docker Compose preserves database and receipt data in named volumes.
+Docker Compose reads manager credentials and the JWT signing secret from `.env`. Changing `MANAGER_PASSWORD` affects a manager only when that account is first seeded into a new database; changing it later does not reset the existing database password. Docker Compose preserves database and receipt data in named volumes.
 
 If PostgreSQL is already using port 5432, change the host-side mapping in `docker-compose.yml`. Likewise, stop other services using ports 4200 or 8080 before starting the complete stack.
 
