@@ -3,6 +3,11 @@ server:
   port: 8080
 
 spring:
+  # Load the project-root .env when running Maven from the backend directory.
+  # Docker Compose supplies these values as environment variables instead.
+  config:
+    import: optional:file:../.env[.properties]
+
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/expense_claims}
     username: ${DB_USERNAME:postgres}

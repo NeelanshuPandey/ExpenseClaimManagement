@@ -31,6 +31,8 @@ If PostgreSQL is already using port 5432, change the host-side mapping in `docke
 
 ## Run frontend and backend locally
 
+If you have not already created it, copy `.env.example` to `.env` in the project root and replace its placeholders. The backend loads this file when you run Maven from the `backend` folder.
+
 Start PostgreSQL first. You can start only the Compose database with:
 
 ```powershell
